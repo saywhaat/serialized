@@ -4,6 +4,16 @@ function is(C, v) {
   return v != null && (v.constructor === C || v instanceof C)
 }
 
+function padStart(s, l, c) {
+  let output = s
+  while (output.length < l) output = c + output
+  return output
+}
+
+function last(v) {
+  return v[v.length - 1]
+}
+
 let finalChar = '$'
 let encodeString = encodeURIComponent
 let decodeString = decodeURIComponent
@@ -39,7 +49,7 @@ export function createType(cb) {
     return {
       serialize(input) {
         let output = serialize(input)
-        while (output !== '' && output[output.length - 1] === finalChar) {
+        while (output !== '' && last(output) === finalChar) {
           output = output.slice(0, -1)
         }
         return output
@@ -53,20 +63,20 @@ export function createType(cb) {
   }
 }
 
-export const withSelf = cb => {
-  const typeWithSelf = createType(() => {
-    const selfInvoke = () => cb(typeWithSelf())
+export const template = cb => {
+  return createType((...tokens) => {
+    const getTokens = () =>
+      tokens.map(token => (is(Function, token) ? token() : token))
     return {
       serialize(input) {
-        return selfInvoke()._serialize(input)
+        return cb(...getTokens())._serialize(input)
       },
 
       deserialize(input) {
-        return selfInvoke()._deserialize(input)
+        return cb(...getTokens())._deserialize(input)
       },
     }
   })
-  return typeWithSelf()
 }
 
 export const stringType = createType(length => {
@@ -110,7 +120,7 @@ export const integerType = createType(max => {
       if (!Number.isInteger(input) || input < 0) throw SERIALIZATION_ERROR
       if (isFixedLength && input > max) throw SERIALIZATION_ERROR
       let value = fromInteger(input)
-      if (length !== undefined) value = value.padStart(length, fromInteger(0))
+      if (length !== undefined) value = padStart(value, length, fromInteger(0))
       return stringToken._serialize(value)
     },
 
@@ -152,11 +162,12 @@ export const constant = createType(value => {
 })
 
 export const objectOf = createType(schema => {
+  const keys = Object.keys(schema)
   return {
     serialize(input) {
       if (!is(Object, input)) throw SERIALIZATION_ERROR
       let output = ''
-      Object.keys(schema).forEach(key => {
+      keys.forEach(key => {
         const value = input[key]
         if (value === undefined) throw SERIALIZATION_ERROR
         output += schema[key]._serialize(value)
@@ -168,7 +179,8 @@ export const objectOf = createType(schema => {
       const output = {}
       let takenCount = 0
       let inputTail = input
-      Object.keys(schema).forEach(key => {
+
+      keys.forEach(key => {
         const [chunk, chunkTakenCount] = schema[key]._deserialize(inputTail)
         output[key] = chunk
         inputTail = inputTail.substring(chunkTakenCount)
@@ -237,6 +249,34 @@ export const arrayOfType = createType((token, length) => {
         while (tailInput !== '' && tailInput[0] !== finalChar) parseChunk()
         if (tailInput !== '' && tailInput[0] === finalChar) takenCount += 1
       }
+      return [output, takenCount]
+    },
+  }
+})
+
+export const mapOf = createType((keyToken, valueToken) => {
+  const DenormalizedMap = arrayOfType(
+    objectOf({
+      key: keyToken,
+      value: valueToken,
+    }),
+  )
+  return {
+    serialize(input) {
+      if (!is(Object, input)) throw SERIALIZATION_ERROR
+      const body = Object.keys(input).map(key => ({
+        key,
+        value: input[key],
+      }))
+      return DenormalizedMap._serialize(body)
+    },
+
+    deserialize(input) {
+      const output = {}
+      const [body, takenCount] = DenormalizedMap._deserialize(input)
+      body.forEach(({ key, value }) => {
+        output[key] = value
+      })
       return [output, takenCount]
     },
   }

@@ -5,10 +5,11 @@ import {
   constant,
   oneOfType,
   objectOf,
-  withSelf,
+  mapOf,
   arrayOfType,
   withCalculatedType,
   createType,
+  template,
 } from './'
 
 function spring(t, v) {
@@ -134,38 +135,35 @@ test('objectOf', () => {
     d: stringType(),
   })
 
-  const RecursiveObject = withSelf(Self =>
-    oneOfType([
-      constant(null),
-      objectOf({
-        a: stringType(3),
-        b: Self,
-      }),
-    ]),
-  )
-
   const data1 = { a: 'a', b: 'bbb', c: 'qwer', d: 'asdf' }
   const data2 = { a: 'aa', b: 'bbb', c: 'qwer', d: 'asdf' }
-  const data3 = {
-    a: '111',
-    b: {
-      a: '222',
-      b: {
-        a: '333',
-        b: null,
-      },
-    },
-  }
 
   expect(spring(SimpleObject, data1)).toEqual(data1)
   expect(() => spring(SimpleObject, data2)).toThrow()
-  expect(spring(RecursiveObject, data3)).toEqual(data3)
+})
+
+test('mapOf', () => {
+  const SimpleMap = mapOf(stringType(), integerType())
+  const EnumKeyMap = mapOf(
+    oneOfType([constant('a'), constant('bb'), constant('ccc')]),
+    integerType(),
+  )
+
+  const data1 = { a: 1, bb: 22, ccc: 333 }
+  const data2 = { a: 1, bb: 22, ccc: 333, dddd: 4444 }
+
+  expect(spring(SimpleMap, data1)).toEqual(data1)
+  expect(spring(EnumKeyMap, data1)).toEqual(data1)
+  expect(() => spring(EnumKeyMap, data2)).toThrow()
+  expect(EnumKeyMap.serialize(data1).length).toBeLessThan(
+    SimpleMap.serialize(data1).length,
+  )
 })
 
 test('withCalculatedType', () => {
   const Obj = objectOf({ a: stringType() })
 
-  const Test = arrayOfType(
+  const Type = arrayOfType(
     withCalculatedType(
       type => {
         switch (type.substring(0, 3)) {
@@ -194,5 +192,125 @@ test('withCalculatedType', () => {
     { type: 'qwer', value: 'qwer' },
   ]
 
-  expect(spring(Test, data1)).toEqual(data1)
+  expect(spring(Type, data1)).toEqual(data1)
+})
+
+test('template', () => {
+  const nullable = template(T => oneOfType([constant(null), T]))
+  const Type = objectOf({
+    str: nullable(stringType()),
+    num: nullable(numberType()),
+  })
+
+  const recursive = template(T =>
+    objectOf({
+      val: T,
+      obj: nullable(recursive(T)),
+    }),
+  )
+  const RecursiveType = recursive(stringType())
+
+  const data1 = { str: null, num: null }
+  const data2 = { str: '1234', num: 1234 }
+  const data3 = { str: null, num: 1234 }
+  const data4 = {
+    val: 'qwer',
+    obj: {
+      val: 'asdf',
+      obj: {
+        val: 'zxcv',
+        obj: null,
+      },
+    },
+  }
+
+  expect(spring(Type, data1)).toEqual(data1)
+  expect(spring(Type, data2)).toEqual(data2)
+  expect(spring(Type, data3)).toEqual(data3)
+  expect(spring(RecursiveType, data4)).toEqual(data4)
+})
+
+test('complex elastic query', () => {
+  function getType(productField) {
+    switch (productField) {
+      case 'id':
+        return integerType()
+      case 'price':
+        return numberType()
+      default:
+        return stringType()
+    }
+  }
+
+  const ProductField = oneOfType([
+    constant('id'),
+    constant('name'),
+    constant('price'),
+    constant('category'),
+    constant('manufacturer'),
+  ])
+
+  const PriceRange = mapOf(
+    constant('price'),
+    objectOf({
+      gte: numberType(),
+      lte: numberType(),
+    }),
+  )
+  const TermOrWildcard = withCalculatedType(
+    getType,
+    (calculateFrom, CalculatedType) =>
+      mapOf(calculateFrom(ProductField), CalculatedType),
+  )
+  const boolType = template(T =>
+    oneOfType([
+      objectOf({
+        should: arrayOfType(T),
+        must: arrayOfType(T),
+      }),
+      objectOf({
+        should: arrayOfType(T),
+      }),
+      objectOf({
+        must: arrayOfType(T),
+      }),
+    ]),
+  )
+
+  const Query = oneOfType([
+    objectOf({ term: TermOrWildcard }),
+    objectOf({ wildcard: TermOrWildcard }),
+    objectOf({ range: PriceRange }),
+    objectOf({ bool: boolType(() => Query) }),
+  ])
+
+  const Search = objectOf({
+    from: integerType(),
+    size: oneOfType([constant(10), constant(100), constant(1000)]),
+    query: Query,
+  })
+
+  // prettier-ignore
+  const search = {
+    from: 15,
+    size: 100,
+    query: {
+      bool: {
+        must: [{
+          bool: {
+            should: [
+              { wildcard: { name: '*tablet*' }},
+              { term: { category: 'Electronics/Tablets' }}]}}, {
+            bool: {
+              should: [{
+                bool: {
+                  must: [
+                    { term: { manufacturer: 'Apple' }},
+                    { range: { price: { gte: 0, lte: 1000 }}}]}}, {
+                bool: {
+                  must: [
+                    { term: { manufacturer: 'Samsung' }},
+                    { range: { price: { gte: 0, lte: 500 }}}]}}]}}]}}}
+
+  expect(spring(Search, search)).toEqual(search)
 })

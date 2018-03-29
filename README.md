@@ -1,6 +1,12 @@
 # serialized
 Serialize and deserialize javascript objects into compact, url encoded strings.
 Useful when you have to store rich objects (such as ElasticSearch queries) in browser url.
+
+## Install
+```
+$ npm install serialized
+```
+
 ## Example
 ```js
 // Describe field types

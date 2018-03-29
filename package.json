@@ -2,11 +2,27 @@
   "name": "serialized",
   "version": "0.0.0",
   "description": "Serialize javascript objects into compact strings",
+  "repository": {
+    "url": "https://github.com/saywhaat/serialized.git",
+    "type": "git"
+  },
+  "keywords": [
+    "serialize",
+    "deserialize",
+    "encode",
+    "decode",
+    "parse",
+    "stringify",
+    "url",
+    "compression"
+  ],
   "main": "dist/index.js",
   "module": "dist/index.es.js",
   "scripts": {
     "build": "rollup -c",
-    "test": "jest"
+    "test": "jest",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "yarn clean && NODE_ENV=production rollup -c"
   },
   "author": "Dmitriy Kuznetsov",
   "license": "MIT",
